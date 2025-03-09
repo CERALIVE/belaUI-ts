@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
-
+# Usage: ./deploy-to-local.sh [SSH_TARGET]
+# If no SSH_TARGET is provided, it defaults to "root@belabox.local"
 # Deploy dist to local belabox via ssh (rsync) and register service and restart service
 
-SSH_TARGET=root@belabox.local
+# This script uses strict error handling:
+#   - set -e: Exit immediately if any command returns a non-zero status.
+#   - set -u: Treat unset variables as errors and exit immediately.
+#   - set -o pipefail: Ensure that a pipeline fails if any command in it fails.
+set -euo pipefail
+
+SSH_TARGET=${1:-root@belabox.local}
 DIST_PATH=dist
 BELAUI_PATH=/opt/belaUI
 RSYNC_TARGET="${SSH_TARGET}:${BELAUI_PATH}"
 
-# stop on error
-set -e
+# Function to check for a command and install it if missing.
+install_if_missing() {
+  local cmd=$1
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Command '$cmd' not found. Installing..."
+    sudo apt-get update && sudo apt-get install -y "$cmd"
+  fi
+}
+
+# Check required local commands individually.
+install_if_missing rsync
+install_if_missing jq
 
 echo "Deploying to $RSYNC_TARGET"
 rsync -rltvz --delete --chown=root:root \
@@ -19,10 +36,8 @@ rsync -rltvz --delete --chown=root:root \
   --exclude relays_cache.json \
   --exclude revision \
   --exclude setup.json \
-  "${DIST_PATH}/" $RSYNC_TARGET
+  "${DIST_PATH}/" "$RSYNC_TARGET"
 
-# Install jq if its not installed
-ssh "$SSH_TARGET" "jq --version 2>/dev/null || apt-get update && apt-get install -y jq"
 
 # Add moblink_relay_enabled: true to setup.json
 echo "Enabling Moblink Relay. You can disable it in $BELAUI_PATH/setup.json"
@@ -39,3 +54,5 @@ echo "Moblink relay installed successfully."
 
 # shellcheck disable=SC2029
 ssh "$SSH_TARGET" "cd $BELAUI_PATH; bash ./override-belaui.sh"
+
+echo "Deployment complete."
