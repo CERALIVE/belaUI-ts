@@ -14,18 +14,46 @@ DIST_PATH=dist
 BELAUI_PATH=/opt/belaUI
 RSYNC_TARGET="${SSH_TARGET}:${BELAUI_PATH}"
 
+# Detect OS and package manager
+detect_package_manager() {
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "brew"
+  elif command -v apt-get >/dev/null 2>&1; then
+    echo "apt"
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "pacman"
+  else
+    echo "unknown"
+  fi
+}
+
+PACKAGE_MANAGER=$(detect_package_manager)
+
 # Function to check for a command and install it if missing.
 install_if_missing() {
   local cmd=$1
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Command '$cmd' not found. Installing..."
-    sudo apt-get update && sudo apt-get install -y "$cmd"
+    case "$PACKAGE_MANAGER" in
+      brew)
+        brew install "$cmd"
+        ;;
+      apt)
+        sudo apt-get update && sudo apt-get install -y "$cmd"
+        ;;
+      pacman)
+        sudo pacman -Sy --noconfirm "$cmd"
+        ;;
+      *)
+        echo "Unsupported package manager. Please install '$cmd' manually."
+        exit 1
+        ;;
+    esac
   fi
 }
 
-# Check required local commands individually.
+# Ensure rsync is installed
 install_if_missing rsync
-install_if_missing jq
 
 echo "Deploying to $RSYNC_TARGET"
 rsync -rltvz --delete --chown=root:root \
@@ -38,6 +66,8 @@ rsync -rltvz --delete --chown=root:root \
   --exclude setup.json \
   "${DIST_PATH}/" "$RSYNC_TARGET"
 
+# Install jq if its not installed
+ssh "$SSH_TARGET" "jq --version 2>/dev/null || apt-get update && apt-get install -y jq"
 
 # Add moblink_relay_enabled: true to setup.json
 echo "Enabling Moblink Relay. You can disable it in $BELAUI_PATH/setup.json"
